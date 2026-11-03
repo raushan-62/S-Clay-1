@@ -20,6 +20,8 @@ strain path.
 2. Open `index.html` in a current desktop or mobile browser.
 3. Enter soil constants and an admissible initial state, or use the defaults.
 4. Choose a strain path and click **Run simulation**.
+   The response charts are then drawn progressively over about 12 seconds, so
+   you can follow the stress paths and model comparison as they develop.
 5. Use **Export CSV** to save the point-by-point history or the chart button to
    save a PNG of the plotted response.
 
