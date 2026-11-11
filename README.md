@@ -11,12 +11,14 @@ strain path.
 - `styles.css` — responsive page styling.
 - `app.js` — browser-side integration and charts. It has no runtime library
   dependencies and sends no inputs or results to a server.
+- `app-q3.js` — refreshed copy of the browser script used by the hosted page so
+  browsers fetch the Question 3 update without reusing a cached script.
 - `s_clay1.py` — Python material-point implementation of the same simplified
   S-CLAY1 formulation.
 
 ## Start the website
 
-1. Keep `index.html`, `styles.css`, and `app.js` together in one folder.
+1. Keep `index.html`, `styles.css`, `app.js`, and `app-q3.js` together in one folder.
 2. Open `index.html` in a current desktop or mobile browser.
 3. The page opens with the Assignment 6 Question 3 values loaded. To restore
    them after exploring other settings, click **Load preset**.
