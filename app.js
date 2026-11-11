@@ -2,7 +2,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const defaults = {lam:.20,kappa:.04,nu:.30,M:1.20,beta:.70,mu:50,p0:100,q0:0,pm0:220,v0:2,alpha0:.42,etaK0:.35,protocol:'cu',evTotal:0,eqTotal:.04,steps:100,substep:.00025,cycles:20,compareMCC:true};
+const defaults = {lam:.20,kappa:.05,nu:.20,M:1.20,beta:.70,mu:50,p0:100,q0:0,pm0:250,v0:1.9,alpha0:0,etaK0:.35,protocol:'q3cu',evTotal:0,eqTotal:.30,steps:3000,substep:.0001,cycles:20,compareMCC:false};
 let lastRun = null;
 let chartData = null;
 let plotProgress = 1;
@@ -11,7 +11,7 @@ let cancelPlotAnimation = null;
 
 const getNumber = id => Number($(id).value);
 const soilParams = () => ({lam:getNumber('lam'),kappa:getNumber('kappa'),nu:getNumber('nu'),M:getNumber('M'),beta:getNumber('beta'),mu:getNumber('mu'),pFloor:1e-6,alphaLimitRatio:.999,tol:1e-10,bisections:60});
-const getState = () => ({v:getNumber('v0'),pm:getNumber('pm0'),alpha:getNumber('alpha0'),maxDrift:0,plasticMultiplier:0,substeps:0});
+const getState = () => ({v:getNumber('v0'),pm:getNumber('pm0'),alpha:getNumber('alpha0'),maxDrift:0,plasticMultiplier:0,substeps:0,epsPPl:0,epsQPl:0});
 const fYield = (p,q,pm,a,M) => (q-a*p)**2-(M*M-a*a)*(pm-p)*p;
 const gradYield = (p,q,pm,a,M) => { const x=q-a*p; return {fp:-2*a*x-(M*M-a*a)*(pm-2*p),fq:2*x,fpm:-(M*M-a*a)*p,fa:-2*p*x+2*a*(pm-p)*p}; };
 const elastic = (p,q,v,de,prm) => {const K=v*p/prm.kappa,G=3*K*(1-2*prm.nu)/(2*(1+prm.nu));return {p:p+K*de[0],q:q+3*G*de[1],K,threeG:3*G};};
@@ -57,7 +57,7 @@ function oneSubstep(point,de,prm){
   dl=Math.max(0,dl);
   const p1=edge.p+K*(rem[0]-dl*g.fp),q1=edge.q+threeG*(rem[1]-dl*g.fq),a1=Math.max(-prm.alphaLimitRatio*prm.M,Math.min(prm.alphaLimitRatio*prm.M,state.alpha+dl*alphaRate));
   const pm1=state.pm+dl*pmRate,v1=state.v*Math.exp(-de[0]);
-  const sUn={...state,v:v1,pm:pm1,alpha:a1,plasticMultiplier:state.plasticMultiplier+dl};valid(p1,q1,sUn,prm);
+  const sUn={...state,v:v1,pm:pm1,alpha:a1,plasticMultiplier:state.plasticMultiplier+dl,epsPPl:(state.epsPPl||0)+dl*g.fp,epsQPl:(state.epsQPl||0)+dl*g.fq};valid(p1,q1,sUn,prm);
   const drift=Math.abs(fYield(p1,q1,pm1,a1,prm.M))/Math.max(p*p,1),denom=(prm.M*prm.M-a1*a1)*p1;
   if(denom<=0)throw Error('Yield ellipse became degenerate during drift correction.');
   const pmCorrected=p1+(q1-a1*p1)**2/denom;
@@ -73,11 +73,11 @@ function updateSubstepped(point,de,prm,maxStep){
 }
 function getProtocolTotals(){
   const type=$('protocol').value;let ev=getNumber('evTotal'),eq=getNumber('eqTotal');
-  if(type==='cu'){ev=0;} else if(type==='extension'){ev=0;if(eq>0)eq=-eq;} else if(type==='cyclic'){ev=0;} else if(type==='iso'){eq=0;} else if(type==='k0'){eq=2*ev/3;}
+  if(type==='cu'||type==='q3cu'){ev=0;} else if(type==='extension'){ev=0;if(eq>0)eq=-eq;} else if(type==='cyclic'){ev=0;} else if(type==='iso'){eq=0;} else if(type==='k0'){eq=2*ev/3;}
   return {ev,eq};
 }
 function simulateProtocol(start,prm,tot,protocol,n,maxStep,cycles){
-  const records=[{...start,state:{...start.state},fraction:0}];let point={...start,state:{...start.state}};
+  const records=[{...start,state:{...start.state},fraction:0}];let point={...start,state:{...start.state}},criticalReached=false;
   if(protocol==='cyclic'){
     const amplitude=Math.abs(tot.eq),legs=3,total=cycles*legs*n;
     let index=0,current=0;
@@ -89,11 +89,20 @@ function simulateProtocol(start,prm,tot,protocol,n,maxStep,cycles){
       }
       current=target;
     }
-  }else for(let i=1;i<=n;i++){
-    point=updateSubstepped(point,[tot.ev/n,tot.eq/n],prm,maxStep);
-    records.push({...point,state:{...point.state},fraction:i/n});
+  }else {
+    let stableCriticalSteps=0;
+    for(let i=1;i<=n;i++){
+      const previous=point.state;
+      point=updateSubstepped(point,[tot.ev/n,tot.eq/n],prm,maxStep);
+      records.push({...point,state:{...point.state},fraction:i/n});
+      if(protocol==='q3cu'){
+        const eta=point.q/point.p,dAlpha=Math.abs(point.state.alpha-previous.alpha),dPm=Math.abs(point.state.pm-previous.pm)/Math.max(Math.abs(previous.pm),1e-12);
+        stableCriticalSteps=Math.abs(eta-prm.M)<1e-5&&dAlpha<1e-7&&dPm<1e-7?stableCriticalSteps+1:0;
+        if(stableCriticalSteps>=10){criticalReached=true;break;}
+      }
+    }
   }
-  return records;
+  return {records,criticalReached};
 }
 function createRun(){
   const prm=soilParams(),state=getState(),start={p:getNumber('p0'),q:getNumber('q0'),ev:0,eq:0,state};validateParams(prm,start,state);
@@ -104,18 +113,18 @@ function createRun(){
   if(protocol==='cyclic'&&(!Number.isInteger(cycles)||cycles<1||cycles>1000))throw Error('Choose between 1 and 1,000 cycles.');
   if(protocol==='cyclic'&&!(Math.abs(tot.eq)>0))throw Error('Cyclic deviatoric strain amplitude must be greater than zero.');
   if(protocol==='cyclic'&&cycles*3*n>100000)throw Error('Cyclic path has too many increments; reduce cycles or steps per leg.');
-  const records=simulateProtocol(start,prm,tot,protocol,n,maxStep,cycles);
+  const mainResult=simulateProtocol(start,prm,tot,protocol,n,maxStep,cycles),records=mainResult.records;
   let mccRecords=null,mccInitial=null,mccSizeAdjusted=false,mccError='';
   if($('compareMCC').checked){
     const pmNeeded=start.p+start.q*start.q/(prm.M*prm.M*start.p);
-    const mccState={...state,pm:Math.max(state.pm,pmNeeded),alpha:0,maxDrift:0,plasticMultiplier:0,substeps:0};
+    const mccState={...state,pm:Math.max(state.pm,pmNeeded),alpha:0,maxDrift:0,plasticMultiplier:0,substeps:0,epsPPl:0,epsQPl:0};
     const mccStart={p:start.p,q:start.q,ev:0,eq:0,state:mccState},mccPrm={...prm,beta:0,mu:0};
     mccSizeAdjusted=mccState.pm>state.pm+1e-10;
     mccInitial={...mccStart,state:{...mccState}};
-    try{validateParams(mccPrm,mccStart,mccState);mccRecords=simulateProtocol(mccStart,mccPrm,tot,protocol,n,maxStep,cycles);}
+    try{validateParams(mccPrm,mccStart,mccState);mccRecords=simulateProtocol(mccStart,mccPrm,tot,protocol,n,maxStep,cycles).records;}
     catch(error){mccError=error.message;}
   }
-  return {records,mccRecords,mccInitial,mccSizeAdjusted,mccError,prm,totals:tot,steps:records.length-1,protocol,initial:{...start,state:{...state}}};
+  return {records,mccRecords,mccInitial,mccSizeAdjusted,mccError,prm,totals:tot,steps:records.length-1,protocol,criticalReached:mainResult.criticalReached,initial:{...start,state:{...state}}};
 }
 
 function updateInitialStatus(){
@@ -126,20 +135,21 @@ function updateInitialStatus(){
 function syncProtocol(){
   const mode=$('protocol').value, note=$('protocolNote');
   if(mode==='cu'){ $('evTotal').value='0';$('eqTotal').value='.04';$('steps').value='100';note.textContent='Constant volume: Δεv = 0. Positive Δεq drives compression. Set the total deviatoric strain and load steps.';}
+  else if(mode==='q3cu'){ $('evTotal').value='0';$('eqTotal').value='.30';$('steps').value='3000';$('substep').value='.0001';note.textContent='Assignment 6 Q3 CU path mapped to S-CLAY1: Δεv = 0, Δεq = 0.30 over up to 3,000 increments. Stops after 10 consecutive steps satisfy |q/p′ − M| < 1e−5, |Δα| < 1e−7, and |Δp′m/p′m| < 1e−7.';}
   else if(mode==='extension'){ $('evTotal').value='0';$('eqTotal').value='-.04';$('steps').value='100';note.textContent='Constant volume: Δεv = 0. Negative Δεq drives triaxial extension.';}
   else if(mode==='cyclic'){ $('evTotal').value='0';$('eqTotal').value='.0025';$('steps').value='20';note.textContent='Triangular undrained cycles: 0 → +amplitude → −amplitude → 0. The paper cautions that S-CLAY1 is unsuitable for cyclic loading; treat this as exploratory only.';}
   else if(mode==='iso'){ $('evTotal').value='.01';$('eqTotal').value='0';note.textContent='Isotropic strain path: deviatoric strain is zero. Positive volumetric strain is compression.';}
   else if(mode==='k0'){ $('evTotal').value='.02';$('eqTotal').value=(2*.02/3).toPrecision(5);note.textContent='Oedometer / K₀ approximation with dεr = 0, so dεq = 2 dεv / 3.';}
   else {note.textContent='Apply a fixed-ratio path between the entered total volumetric and deviatoric strains.';}
-  $('evTotal').disabled=mode==='cu'||mode==='extension'||mode==='cyclic';$('eqTotal').disabled=mode==='iso'||mode==='k0';$('cyclesLabel').hidden=mode!=='cyclic';
+  $('evTotal').disabled=mode==='cu'||mode==='q3cu'||mode==='extension'||mode==='cyclic';$('eqTotal').disabled=mode==='iso'||mode==='k0';$('cyclesLabel').hidden=mode!=='cyclic';
   $('evLabel').style.opacity=$('evTotal').disabled?'.55':'1';$('eqLabel').style.opacity=$('eqTotal').disabled?'.55':'1';
 }
 
 const fmt=(n,d=3)=>Number(n).toLocaleString(undefined,{maximumFractionDigits:d,minimumFractionDigits:0});
 function showResults(run){
   const end=run.records[run.records.length-1];$('metricP').innerHTML=`${fmt(end.p,2)}<small> kPa</small>`;$('metricQ').innerHTML=`${fmt(end.q,2)}<small> kPa</small>`;$('metricAlpha').textContent=fmt(end.state.alpha,4);$('metricDrift').textContent=end.state.maxDrift.toExponential(2);$('stepCount').textContent=`${end.state.substeps.toLocaleString()} internal substeps · ${run.steps} prescribed increments`;
-  const note=$('comparisonNote');if(run.mccRecords){const m=run.mccRecords.at(-1);note.textContent=`MCC final: p′ ${fmt(m.p,2)} kPa, q ${fmt(m.q,2)} kPa. The baseline uses α₀ = β = μ = 0${run.mccSizeAdjusted?`; its p′m₀ was increased to ${fmt(run.mccInitial.state.pm,2)} kPa so the same starting stress is admissible`:''}.`;}else if(run.mccError){note.textContent=`S-CLAY1 completed; MCC baseline stopped: ${run.mccError}`;}else note.textContent='MCC comparison overlay is off.';note.hidden=!$('compareMCC').checked;
-  $('csvBtn').disabled=false;$('pngBtn').disabled=true;chartData=run;$('porePressureCard').hidden=!['cu','extension','cyclic'].includes(run.protocol);plotProgress=0;drawAll(run,0);
+  const note=$('comparisonNote');if(run.protocol==='q3cu'){const eta=end.q/end.p;note.textContent=`Question 3 data loaded into the S-CLAY1 formulation. Assumed S-CLAY1-only inputs: α₀ = 0, β = 0.70, μ = 50. Near-critical checks: |q/p′ − M| = ${Math.abs(eta-run.prm.M).toExponential(2)}; ${run.criticalReached?'criterion reached.':'maximum Δεq reached before criterion.'}`;note.hidden=false;}else if(run.mccRecords){const m=run.mccRecords.at(-1);note.textContent=`MCC final: p′ ${fmt(m.p,2)} kPa, q ${fmt(m.q,2)} kPa. The baseline uses α₀ = β = μ = 0${run.mccSizeAdjusted?`; its p′m₀ was increased to ${fmt(run.mccInitial.state.pm,2)} kPa so the same starting stress is admissible`:''}.`;}else if(run.mccError){note.textContent=`S-CLAY1 completed; MCC baseline stopped: ${run.mccError}`;}else note.textContent='MCC comparison overlay is off.';note.hidden=run.protocol!=='q3cu'&&!$('compareMCC').checked;
+  $('csvBtn').disabled=false;$('pngBtn').disabled=true;chartData=run;$('porePressureCard').hidden=!['cu','q3cu','extension','cyclic'].includes(run.protocol);plotProgress=0;drawAll(run,0);
 }
 
 function niceRange(min,max){if(!Number.isFinite(min)||!Number.isFinite(max))return [0,1];if(min===max){const pad=Math.max(Math.abs(min)*.1,1e-4);return [min-pad,max+pad];}const pad=(max-min)*.08;return [min-pad,max+pad];}
@@ -167,9 +177,11 @@ function drawAll(run,progress=1){
   const m=run.mccRecords,overlay=m?[{data:m.map(a=>({x:a.eq*100,y:a.q})),color:'#80649c',width:1.6,dash:[6,4],animate:true}]:[];
   chart('chartQ',[{data:r.map(a=>({x:a.eq*100,y:a.q})),color:'#21745e',width:2,animate:true},...overlay],{progress,xLabel:'Deviatoric strain, εq [%]',yLabel:'Deviator stress, q [kPa]',xFormat:x=>fmt(x,2),yFormat:y=>fmt(y,1)});
   chart('chartPath',[{data:r.map(a=>({x:a.p,y:a.q})),color:'#21745e',width:2,animate:true},{data:yieldCurve(start.state.pm,start.state.alpha,M,2),color:'#96aaa0',width:1,dash:[4,4]},{data:yieldCurve(end.state.pm,end.state.alpha,M,2),color:'#d49a45',width:1.5},...(m?[{data:m.map(a=>({x:a.p,y:a.q})),color:'#80649c',width:1.6,dash:[6,4],animate:true},{data:yieldCurve(run.mccInitial.state.pm,0,M,2),color:'#80649c',width:1,dash:[2,3]}]:[])],{progress,xLabel:'Mean effective stress, p′ [kPa]',yLabel:'Deviator stress, q [kPa]',xFormat:x=>fmt(x,0),yFormat:y=>fmt(y,0)});
-  chart('chartV',[{data:r.map(a=>({x:a.p,y:a.state.v})),color:'#21745e',width:2,animate:true},...(m?[{data:m.map(a=>({x:a.p,y:a.state.v})),color:'#80649c',width:1.6,dash:[6,4],animate:true}]:[])],{progress,xLabel:'Mean effective stress, p′ [kPa]',yLabel:'Specific volume, v',xFormat:x=>fmt(x,0),yFormat:y=>fmt(y,3)});
+  chart('chartV',[{data:r.map(a=>({x:a.p,y:a.state.v-1})),color:'#21745e',width:2,animate:true},...(m?[{data:m.map(a=>({x:a.p,y:a.state.v-1})),color:'#80649c',width:1.6,dash:[6,4],animate:true}]:[])],{progress,xLabel:'Mean effective stress, p′ [kPa]',yLabel:'Void ratio, e',xFormat:x=>fmt(x,0),yFormat:y=>fmt(y,3)});
   chart('chartAlpha',[{data:r.map(a=>({x:a.eq*100,y:a.state.alpha})),color:'#21745e',width:2,animate:true},...(m?[{data:m.map(a=>({x:a.eq*100,y:a.state.alpha})),color:'#80649c',width:1.6,dash:[6,4],animate:true}]:[])],{progress,xLabel:'Deviatoric strain, εq [%]',yLabel:'Yield inclination, α',xFormat:x=>fmt(x,2),yFormat:y=>fmt(y,3)});
-  if(['cu','extension','cyclic'].includes(run.protocol)){const p0=start.p,q0=start.q;chart('chartU',[{data:r.map(a=>({x:a.eq*100,y:(p0-a.p)+(a.q-q0)/3})),color:'#21745e',width:2,animate:true},...(m?[{data:m.map(a=>({x:a.eq*100,y:(p0-a.p)+(a.q-q0)/3})),color:'#80649c',width:1.6,dash:[6,4],animate:true}]:[])],{progress,xLabel:'Deviatoric strain, εq [%]',yLabel:'Estimated excess pore pressure, Δu [kPa]',xFormat:x=>fmt(x,2),yFormat:y=>fmt(y,1)});}
+  chart('chartEPPl',[{data:r.map(a=>({x:a.eq*100,y:a.state.epsPPl||0})),color:'#21745e',width:2,animate:true}],{progress,xLabel:'Deviatoric strain, εq [%]',yLabel:'Plastic volumetric strain, εpᵖˡ',xFormat:x=>fmt(x,2),yFormat:y=>fmt(y,4)});
+  chart('chartEQPl',[{data:r.map(a=>({x:a.eq*100,y:a.state.epsQPl||0})),color:'#21745e',width:2,animate:true}],{progress,xLabel:'Deviatoric strain, εq [%]',yLabel:'Plastic deviatoric strain, εqᵖˡ',xFormat:x=>fmt(x,2),yFormat:y=>fmt(y,4)});
+  if(['cu','q3cu','extension','cyclic'].includes(run.protocol)){const p0=start.p,q0=start.q;chart('chartU',[{data:r.map(a=>({x:a.eq*100,y:(p0-a.p)+(a.q-q0)/3})),color:'#21745e',width:2,animate:true},...(m?[{data:m.map(a=>({x:a.eq*100,y:(p0-a.p)+(a.q-q0)/3})),color:'#80649c',width:1.6,dash:[6,4],animate:true}]:[])],{progress,xLabel:'Deviatoric strain, εq [%]',yLabel:'Estimated excess pore pressure, Δu [kPa]',xFormat:x=>fmt(x,2),yFormat:y=>fmt(y,1)});}
 }
 
 function animatePlots(run){
@@ -184,17 +196,19 @@ function animatePlots(run){
   });
 }
 
-function downloadCsv(){if(!chartData)return;const head=['step','fraction','p_kPa','q_kPa','eps_v','eps_q','specific_volume_v','p_m_kPa','alpha','yield_f','normalized_pre_correction_drift','plastic_multiplier_cumulative','substeps','estimated_excess_u_kPa_constant_cell_pressure','mcc_p_kPa','mcc_q_kPa','mcc_v','mcc_p_m_kPa','mcc_yield_f'];const p0=chartData.initial.p,q0=chartData.initial.q;const rows=chartData.records.map((a,i)=>{const m=chartData.mccRecords?.[i];return [i,a.fraction,a.p,a.q,a.ev,a.eq,a.state.v,a.state.pm,a.state.alpha,fYield(a.p,a.q,a.state.pm,a.state.alpha,chartData.prm.M),a.state.maxDrift,a.state.plasticMultiplier,a.state.substeps,(p0-a.p)+(a.q-q0)/3,m?.p??'',m?.q??'',m?.state.v??'',m?.state.pm??'',m?fYield(m.p,m.q,m.state.pm,m.state.alpha,chartData.prm.M):''];});const csv=[head,...rows].map(row=>row.map(x=>typeof x==='number'?Number(x).toPrecision(12):x).join(',')).join('\r\n');downloadBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),'s-clay1-response.csv');}
+function downloadCsv(){if(!chartData)return;const head=['step','fraction','p_kPa','q_kPa','eps_v','eps_q','eps_p_plastic','eps_q_plastic','void_ratio_e','specific_volume_v','p_m_kPa','alpha','yield_f','normalized_pre_correction_drift','plastic_multiplier_cumulative','substeps','estimated_excess_u_kPa_constant_cell_pressure','mcc_p_kPa','mcc_q_kPa','mcc_v','mcc_p_m_kPa','mcc_yield_f'];const p0=chartData.initial.p,q0=chartData.initial.q;const rows=chartData.records.map((a,i)=>{const m=chartData.mccRecords?.[i];return [i,a.fraction,a.p,a.q,a.ev,a.eq,a.state.epsPPl||0,a.state.epsQPl||0,a.state.v-1,a.state.v,a.state.pm,a.state.alpha,fYield(a.p,a.q,a.state.pm,a.state.alpha,chartData.prm.M),a.state.maxDrift,a.state.plasticMultiplier,a.state.substeps,(p0-a.p)+(a.q-q0)/3,m?.p??'',m?.q??'',m?.state.v??'',m?.state.pm??'',m?fYield(m.p,m.q,m.state.pm,m.state.alpha,chartData.prm.M):''];});const csv=[head,...rows].map(row=>row.map(x=>typeof x==='number'?Number(x).toPrecision(12):x).join(',')).join('\r\n');downloadBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),'s-clay1-response.csv');}
 function downloadBlob(blob,name){const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-function downloadCharts(){const ids=['chartQ','chartPath','chartV','chartAlpha'];if(!['cu','extension','cyclic'].includes(chartData.protocol))ids.pop();else ids.push('chartU');const rows=Math.ceil(ids.length/2),w=1400,h=120+rows*380,out=document.createElement('canvas');out.width=w;out.height=h;const c=out.getContext('2d');c.fillStyle='#f4f5f0';c.fillRect(0,0,w,h);c.fillStyle='#152a25';c.font='700 26px Arial';c.fillText('S-CLAY1 · material point response',48,48);c.fillStyle='#74817a';c.font='13px Consolas';c.fillText(`p′=${fmt(chartData.records.at(-1).p,2)} kPa · q=${fmt(chartData.records.at(-1).q,2)} kPa · α=${fmt(chartData.records.at(-1).state.alpha,4)}`,48,74);ids.forEach((id,i)=>{const src=$(id),x=40+(i%2)*680,y=100+Math.floor(i/2)*380;c.fillStyle='#fff';c.fillRect(x,y,640,350);c.drawImage(src,x+10,y+25,620,310);});out.toBlob(b=>downloadBlob(b,'s-clay1-charts.png'));}
+function downloadCharts(){const ids=['chartQ','chartPath','chartV','chartAlpha','chartEPPl','chartEQPl'];if(['cu','q3cu','extension','cyclic'].includes(chartData.protocol))ids.push('chartU');const rows=Math.ceil(ids.length/2),w=1400,h=120+rows*380,out=document.createElement('canvas');out.width=w;out.height=h;const c=out.getContext('2d');c.fillStyle='#f4f5f0';c.fillRect(0,0,w,h);c.fillStyle='#152a25';c.font='700 26px Arial';c.fillText('S-CLAY1 · material point response',48,48);c.fillStyle='#74817a';c.font='13px Consolas';c.fillText(`p′=${fmt(chartData.records.at(-1).p,2)} kPa · q=${fmt(chartData.records.at(-1).q,2)} kPa · α=${fmt(chartData.records.at(-1).state.alpha,4)}`,48,74);ids.forEach((id,i)=>{const src=$(id),x=40+(i%2)*680,y=100+Math.floor(i/2)*380;c.fillStyle='#fff';c.fillRect(x,y,640,350);c.drawImage(src,x+10,y+25,620,310);});out.toBlob(b=>downloadBlob(b,'s-clay1-charts.png'));}
 
 function setStatus(label,kind='ready'){$('modelStatus').innerHTML=`<i></i> ${label}`;$('modelStatus').style.color=kind==='error'?'#a84e43':kind==='busy'?'#ae7b35':'#37765f';$('modelStatus').querySelector('i').style.background=kind==='error'?'#c46f62':kind==='busy'?'#d49a45':'#42a77c';}
 async function runSimulation(){const btn=$('runBtn'),err=$('errorBox');btn.disabled=true;err.hidden=true;setStatus('CALCULATING','busy');await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,30)));try{const run=createRun();lastRun=run;showResults(run);await animatePlots(run);}catch(e){err.textContent=e.message;err.hidden=false;setStatus('CHECK INPUTS','error');}finally{btn.disabled=false;}}
 function reset(){if(cancelPlotAnimation)cancelPlotAnimation();if(plotAnimationFrame)cancelAnimationFrame(plotAnimationFrame);plotProgress=1;for(const [id,val] of Object.entries(defaults)){if($(id)){if(id==='compareMCC')$(id).checked=val;else $(id).value=val;}}syncProtocol();lastRun=null;chartData=null;$('porePressureCard').hidden=true;$('comparisonNote').hidden=true;$('errorBox').hidden=true;$('csvBtn').disabled=true;$('pngBtn').disabled=true;$('metricP').innerHTML='—<small> kPa</small>';$('metricQ').innerHTML='—<small> kPa</small>';$('metricAlpha').textContent='—';$('metricDrift').textContent='—';$('stepCount').textContent='No run yet';setStatus('READY');updateInitialStatus();drawEmpty();}
-function drawEmpty(){for(const id of ['chartQ','chartPath','chartV','chartAlpha','chartU'])chart(id,[{data:[]}],{xLabel:'',yLabel:''});}
+function drawEmpty(){for(const id of ['chartQ','chartPath','chartV','chartAlpha','chartEPPl','chartEQPl','chartU'])chart(id,[{data:[]}],{xLabel:'',yLabel:''});}
 
 $('runBtn').addEventListener('click',runSimulation);$('resetBtn').addEventListener('click',reset);$('csvBtn').addEventListener('click',downloadCsv);$('pngBtn').addEventListener('click',downloadCharts);$('protocol').addEventListener('change',()=>{syncProtocol();updateInitialStatus();});$('alphaK0Btn').addEventListener('click',()=>{const M=getNumber('M'),eta=getNumber('etaK0');if(!(M>Math.abs(eta))){$('initialStatus').textContent='Need M > |ηK₀| to calculate αK₀.';$('initialStatus').className='inline-status invalid';return;}const a=eta-.75*(M*M-eta*eta);$('alpha0').value=Number(a.toFixed(5));updateInitialStatus();});
+$('q3PresetBtn').addEventListener('click',()=>{const preset={lam:.20,kappa:.05,nu:.20,M:1.20,beta:.70,mu:50,p0:100,q0:0,pm0:250,v0:1.90,alpha0:0,protocol:'q3cu',compareMCC:false};for(const [id,value] of Object.entries(preset)){if(id==='compareMCC')$(id).checked=value;else $(id).value=value;}syncProtocol();updateInitialStatus();$('comparisonNote').hidden=true;});
 $('yieldSizeBtn').addEventListener('click',()=>{const p=getNumber('p0'),q=getNumber('q0'),a=getNumber('alpha0'),M=getNumber('M'),den=(M*M-a*a)*p;if(!(p>0&&den>0)){ $('initialStatus').textContent='Need p′ > 0 and |α| < M to set the yield size.';$('initialStatus').className='inline-status invalid';return;}const pm=p+(q-a*p)**2/den;$('pm0').value=Number(pm.toFixed(5));updateInitialStatus();});
 for(const el of document.querySelectorAll('input'))el.addEventListener('input',updateInitialStatus);
 window.addEventListener('resize',()=>{if(chartData)drawAll(chartData,plotProgress);else drawEmpty();});
 syncProtocol();updateInitialStatus();drawEmpty();
+
