@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#10231f">
+  <meta name="description" content="A local S-CLAY1 material point workbench for exploring effective stress paths, fabric rotation, and constitutive response.">
   <title>S-CLAY1 | Soil point laboratory</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -38,8 +39,8 @@
           <summary><span class="step-no">A</span> Soil parameters <span class="summary-note">S-CLAY1</span></summary>
           <div class="field-grid three">
             <label>λ <input id="lam" type="number" value="0.20" min="0.0001" step="0.01"></label>
-            <label>κ <input id="kappa" type="number" value="0.04" min="0.0001" step="0.01"></label>
-            <label>ν′ <input id="nu" type="number" value="0.30" min="-0.98" max="0.48" step="0.01"></label>
+            <label>κ <input id="kappa" type="number" value="0.05" min="0.0001" step="0.01"></label>
+            <label>ν′ <input id="nu" type="number" value="0.20" min="-0.98" max="0.48" step="0.01"></label>
             <label>M <input id="M" type="number" value="1.20" min="0.01" step="0.05"></label>
             <label>β <input id="beta" type="number" value="0.70" min="0" step="0.1"></label>
             <label>μ <input id="mu" type="number" value="50" min="0" step="1"></label>
@@ -49,15 +50,17 @@
 
         <details open class="control-group">
           <summary><span class="step-no">B</span> Initial state <span class="summary-note">kPa · dimensionless</span></summary>
+          <div class="assignment-preset"><div><b>Assignment 6 · Question 3</b><small>Use its CU soil data as an S-CLAY1 input preset.</small></div><button id="q3PresetBtn" class="outline-button" type="button">Load preset</button></div>
+          <p class="field-hint">The assignment specifies MCC. This preset keeps the S-CLAY1 equations and maps its shared inputs. S-CLAY1-only assumptions: α₀ = 0, β = 0.70, μ = 50.</p>
           <div class="field-grid three">
             <label>p′₀ <input id="p0" type="number" value="100" min="0.001" step="10"></label>
             <label>q₀ <input id="q0" type="number" value="0" step="5"></label>
-            <label>p′m₀ <div class="input-with-action"><input id="pm0" type="number" value="220" min="0.001" step="10"><button id="yieldSizeBtn" type="button" title="Set the yield surface through the current stress">OCR 1</button></div></label>
-            <label>Specific volume, v₀ <input id="v0" type="number" value="2.0" min="1.001" step="0.01"></label>
-            <label>Inclination, α₀ <input id="alpha0" type="number" value="0.42" step="0.01"></label>
+            <label>p′m₀ <div class="input-with-action"><input id="pm0" type="number" value="250" min="0.001" step="10"><button id="yieldSizeBtn" type="button" title="Set the yield surface through the current stress">OCR 1</button></div></label>
+            <label>Specific volume, v₀ <input id="v0" type="number" value="1.9" min="1.001" step="0.01"></label>
+            <label>Inclination, α₀ <input id="alpha0" type="number" value="0" step="0.01"></label>
             <label>ηK₀ helper <div class="input-with-action"><input id="etaK0" type="number" value="0.35" step="0.01"><button id="alphaK0Btn" type="button" title="Calculate alpha from K0">Set α</button></div></label>
           </div>
-          <div id="initialStatus" class="inline-status"></div>
+          <div id="initialStatus" class="inline-status" aria-live="polite"></div>
         </details>
 
         <details open class="control-group">
@@ -65,6 +68,7 @@
           <label class="select-label">Test protocol
             <select id="protocol">
               <option value="cu">Undrained triaxial compression</option>
+              <option value="q3cu" selected>Assignment 6 Q3 · CU to near-critical state (S-CLAY1)</option>
               <option value="extension">Undrained triaxial extension</option>
               <option value="cyclic">Cyclic undrained triaxial</option>
               <option value="iso">Isotropic compression / swelling</option>
@@ -74,16 +78,16 @@
           </label>
           <div class="field-grid two path-fields">
             <label id="evLabel">Total Δεv <input id="evTotal" type="number" value="0" step="0.001"></label>
-            <label id="eqLabel">Total Δεq <input id="eqTotal" type="number" value="0.04" step="0.001"></label>
-            <label>Load steps <input id="steps" type="number" value="100" min="1" max="20000" step="10"></label>
-            <label>Internal step limit <input id="substep" type="number" value="0.00025" min="0.000001" step="0.00005"></label>
+            <label id="eqLabel">Total Δεq <input id="eqTotal" type="number" value="0.30" step="0.001"></label>
+            <label>Load steps <input id="steps" type="number" value="3000" min="1" max="20000" step="10"></label>
+            <label>Internal step limit <input id="substep" type="number" value="0.0001" min="0.000001" step="0.00005"></label>
             <label id="cyclesLabel" hidden>Cycles <input id="cycles" type="number" value="20" min="1" max="1000" step="1"></label>
           </div>
           <div class="preset-note" id="protocolNote">Constant volume: Δεv = 0. Positive Δεq drives compression; negative Δεq drives extension.</div>
-          <label class="compare-toggle"><input id="compareMCC" type="checkbox" checked><span><b>Overlay Modified Cam Clay</b><small>Same λ, κ, ν′ and M; α = β = μ = 0</small></span></label>
+          <label class="compare-toggle"><input id="compareMCC" type="checkbox"><span><b>Overlay Modified Cam Clay</b><small>Same λ, κ, ν′ and M; α = β = μ = 0</small></span></label>
         </details>
         <button class="run-button" type="button" id="runBtn"><span class="play-icon">▶</span> Run simulation <span class="run-arrow">↗</span></button>
-        <div class="control-foot"><span>MODEL STATUS</span><b id="modelStatus"><i></i> READY</b></div>
+        <div class="control-foot"><span>MODEL STATUS</span><b id="modelStatus" role="status" aria-live="polite"><i></i> READY</b></div>
       </aside>
 
       <section class="results" aria-label="Simulation results">
@@ -98,9 +102,11 @@
         <div class="chart-grid">
           <article class="chart-card"><div class="chart-title"><div><span class="chart-index">01</span><h3>Deviator stress response</h3></div><span class="chart-unit">q [kPa] · εq [%]</span></div><canvas id="chartQ"></canvas><div class="chart-legend"><span><i class="legend-line teal"></i> S-CLAY1</span><span><i class="legend-line violet"></i> MCC</span></div></article>
           <article class="chart-card"><div class="chart-title"><div><span class="chart-index">02</span><h3>Effective stress path</h3></div><span class="chart-unit">q [kPa] · p′ [kPa]</span></div><canvas id="chartPath"></canvas><div class="chart-legend"><span><i class="legend-line teal"></i> S-CLAY1</span><span><i class="legend-dash"></i> initial yield</span><span><i class="legend-line gold"></i> final yield</span><span><i class="legend-line violet"></i> MCC</span></div></article>
-          <article class="chart-card"><div class="chart-title"><div><span class="chart-index">03</span><h3>Specific volume evolution</h3></div><span class="chart-unit">v · p′ [kPa]</span></div><canvas id="chartV"></canvas><div class="chart-legend"><span><i class="legend-line teal"></i> S-CLAY1</span><span><i class="legend-line violet"></i> MCC</span></div></article>
+          <article class="chart-card"><div class="chart-title"><div><span class="chart-index">03</span><h3>Void ratio evolution</h3></div><span class="chart-unit">e · p′ [kPa]</span></div><canvas id="chartV"></canvas><div class="chart-legend"><span><i class="legend-line teal"></i> S-CLAY1</span><span><i class="legend-line violet"></i> MCC</span></div></article>
           <article class="chart-card"><div class="chart-title"><div><span class="chart-index">04</span><h3>Yield surface rotation</h3></div><span class="chart-unit">α · εq [%]</span></div><canvas id="chartAlpha"></canvas><div class="chart-legend"><span><i class="legend-line teal"></i> S-CLAY1</span><span><i class="legend-line violet"></i> MCC (α = 0)</span></div></article>
-          <article class="chart-card" id="porePressureCard" hidden><div class="chart-title"><div><span class="chart-index">05</span><h3>Estimated excess pore pressure</h3></div><span class="chart-unit">Δu [kPa] · cycle / εq [%]</span></div><canvas id="chartU"></canvas><div class="chart-legend"><span><i class="legend-line teal"></i> S-CLAY1</span><span><i class="legend-line violet"></i> MCC</span><span>constant cell pressure</span></div></article>
+          <article class="chart-card"><div class="chart-title"><div><span class="chart-index">05</span><h3>Plastic volumetric strain</h3></div><span class="chart-unit">εpᵖˡ · εq [%]</span></div><canvas id="chartEPPl"></canvas><div class="chart-legend"><span><i class="legend-line teal"></i> S-CLAY1</span></div></article>
+          <article class="chart-card"><div class="chart-title"><div><span class="chart-index">06</span><h3>Plastic deviatoric strain</h3></div><span class="chart-unit">εqᵖˡ · εq [%]</span></div><canvas id="chartEQPl"></canvas><div class="chart-legend"><span><i class="legend-line teal"></i> S-CLAY1</span></div></article>
+          <article class="chart-card" id="porePressureCard" hidden><div class="chart-title"><div><span class="chart-index">07</span><h3>Estimated excess pore pressure</h3></div><span class="chart-unit">Δu [kPa] · εq [%]</span></div><canvas id="chartU"></canvas><div class="chart-legend"><span><i class="legend-line teal"></i> S-CLAY1</span><span><i class="legend-line violet"></i> MCC</span><span>constant cell pressure</span></div></article>
         </div>
         <div class="comparison-note" id="comparisonNote" hidden></div>
         <div class="results-foot"><span>COMPRESSION POSITIVE · SIGNED q · WORK-CONJUGATE INVARIANTS</span><span id="stepCount">No run yet</span></div>
@@ -112,3 +118,4 @@
   <script src="app.js"></script>
 </body>
 </html>
+
