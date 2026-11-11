@@ -18,12 +18,36 @@ strain path.
 
 1. Keep `index.html`, `styles.css`, and `app.js` together in one folder.
 2. Open `index.html` in a current desktop or mobile browser.
-3. Enter soil constants and an admissible initial state, or use the defaults.
+3. The page opens with the Assignment 6 Question 3 values loaded. To restore
+   them after exploring other settings, click **Load preset**.
 4. Choose a strain path and click **Run simulation**.
    The response charts are then drawn progressively over about 12 seconds, so
    you can follow the stress paths and model comparison as they develop.
 5. Use **Export CSV** to save the point-by-point history or the chart button to
    save a PNG of the plotted response.
+
+## Assignment 6, Question 3 input preset
+
+Click **Load preset** in the Initial state panel to apply the soil data from
+Question 3 to the S-CLAY1 workbench: λ = 0.20, κ = 0.05, ν′ = 0.20, M = 1.20,
+p′₀ = 100 kPa, q₀ = 0, e₀ = 0.9 (so v₀ = 1.9), and OCR = 2.5 (so
+p′m₀ = 250 kPa). The preset uses undrained triaxial compression with Δεv = 0
+and progressively loads Δεq toward 0.30. It stops after ten consecutive steps
+satisfy |q/p′ − M| < 10⁻⁵, |Δα| < 10⁻⁷, and |Δp′m/p′m| < 10⁻⁷, or reports that
+the strain limit was reached first. Plot rendering remains progressively
+animated after the solver finishes.
+
+Question 3 specifies Modified Cam Clay, while this page remains the
+S-CLAY1 model. Its S-CLAY1-only values, which Question 3 does not provide, are
+assumed as α₀ = 0, β = 0.70, and μ = 50. The page plots q–p′ with initial and
+final S-CLAY1 yield surfaces, e–p′, q–εq, estimated u–εq, εpᵖˡ–εq, and
+εqᵖˡ–εq, along with the S-CLAY1 fabric-inclination plot. The pore-pressure
+estimate uses the standard CU total-stress path u = p₀ + q/3 − p′. This preset
+uses the assignment's shared CU inputs; it does not replace S-CLAY1 with the
+MCC yield law or claim to perform the assignment's MCC-only analytical check.
+
+The exported CSV includes the accumulated associated plastic volumetric and
+deviatoric strains. The Python `State` object also carries these two histories.
 
 The website is static: it does not need Python, a package install, or a
 backend. To share the app as a hosted link, publish all three website files
@@ -130,9 +154,11 @@ The charts show:
 1. Deviator stress `q` against deviatoric strain `eps_q`.
 2. Effective stress path `q` against `p'`, with initial and final yield
    surfaces.
-3. Specific volume `v` against `p'`.
+3. Void ratio `e` against `p'`.
 4. Yield inclination `alpha` against `eps_q`.
-5. For undrained paths, estimated excess pore pressure against `eps_q`.
+5. Plastic volumetric strain against `eps_q`.
+6. Plastic deviatoric strain against `eps_q`.
+7. For undrained paths, estimated excess pore pressure against `eps_q`.
 
 The excess pore pressure estimate assumes constant total cell pressure:
 `delta_u = p'0 - p' + (q - q0) / 3`. It is an estimate under that boundary
@@ -204,3 +230,4 @@ The return value from each update is `(sigma_new, eps_new, state_new)`.
 Wheeler, S. J., Näätänen, A., Karstunen, M., and Lojander, M. (2003).
 “An anisotropic elastoplastic model for soft clays.” *Canadian Geotechnical
 Journal*, 40, 403–418. DOI: 10.1139/T02-119.
+
